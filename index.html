@@ -11,9 +11,7 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap"
-        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <!-- Plyr CSS for video player -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
@@ -52,16 +50,27 @@
         </div>
     </header>
 
-    <!-- Hero Section -->
-    <section class="hero" id="hero">
-        <div class="hero-overlay"></div>
-        <div class="hero-content">
-            <div class="container">
-                <div class="hero-text">
-                    <h2 class="hero-title">Khám phá thế giới điện ảnh</h2>
-                    <p class="hero-description">Hàng ngàn bộ phim HD chất lượng cao, cập nhật liên tục</p>
-                </div>
-            </div>
+    <!-- Hero Slider Section -->
+    <section class="hero-slider" id="heroSlider">
+        <div class="hero-slider-container">
+            <!-- Slides will be inserted here by JavaScript -->
+        </div>
+
+        <!-- Navigation Arrows -->
+        <button class="hero-slider-arrow hero-slider-prev" id="heroSliderPrev">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+        <button class="hero-slider-arrow hero-slider-next" id="heroSliderNext">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>
+
+        <!-- Dots Indicator -->
+        <div class="hero-slider-dots" id="heroSliderDots">
+            <!-- Dots will be inserted here by JavaScript -->
         </div>
     </section>
 
@@ -216,6 +225,7 @@
 
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/hero-slider.js"></script>
     <script src="js/player.js"></script>
     <script src="js/app.js"></script>
 </body>

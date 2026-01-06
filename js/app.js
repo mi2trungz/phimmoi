@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeApp() {
+    // Initialize hero slider
+    initHeroSlider();
+
     // Load initial movies
     loadLatestMovies();
 

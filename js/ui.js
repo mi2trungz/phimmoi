@@ -141,10 +141,22 @@ function updateSectionTitle(title) {
     sectionTitle.textContent = title;
 }
 
-// Scroll to top smoothly
+// Scroll to movies section smoothly
 function scrollToTop() {
-    window.scrollTo({
-        top: 0,
-        behavior: 'smooth'
-    });
+    const sectionTitle = document.getElementById('sectionTitle');
+    if (sectionTitle) {
+        const headerHeight = document.querySelector('.header').offsetHeight;
+        const targetPosition = sectionTitle.offsetTop - headerHeight - 20;
+
+        window.scrollTo({
+            top: targetPosition,
+            behavior: 'smooth'
+        });
+    } else {
+        // Fallback to top if section title not found
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+        });
+    }
 }

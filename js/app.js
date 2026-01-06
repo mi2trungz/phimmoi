@@ -89,6 +89,21 @@ function setupEventListeners() {
         });
     });
 
+    // Logo click - navigate to home
+    const logoLink = document.getElementById('logoLink');
+    if (logoLink) {
+        logoLink.addEventListener('click', (e) => {
+            e.preventDefault();
+
+            // Remove active state from all nav links
+            navLinks.forEach(l => l.classList.remove('active'));
+
+            // Reset and load home
+            resetFilters();
+            loadLatestMovies();
+        });
+    }
+
     // Filters
     const genreFilter = document.getElementById('genreFilter');
     const countryFilter = document.getElementById('countryFilter');
@@ -150,6 +165,23 @@ function setupEventListeners() {
 
     modalOverlay.addEventListener('click', closeModal);
     modalClose.addEventListener('click', closeModal);
+
+    // Mobile search toggle
+    const mobileSearchToggle = document.getElementById('mobileSearchToggle');
+    const searchBox = document.getElementById('searchBox');
+
+    if (mobileSearchToggle) {
+        mobileSearchToggle.addEventListener('click', () => {
+            searchBox.classList.toggle('active');
+        });
+
+        // Close search box when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!searchBox.contains(e.target) && !mobileSearchToggle.contains(e.target)) {
+                searchBox.classList.remove('active');
+            }
+        });
+    }
 }
 
 // Load latest movies
@@ -202,8 +234,7 @@ async function loadMoviesByCategory(slug) {
 
             const categoryNames = {
                 'phim-bo': 'Phim bộ',
-                'phim-le': 'Phim lẻ',
-                'phim-chieu-rap': 'Phim chiếu rạp'
+                'phim-le': 'Phim lẻ'
             };
             updateSectionTitle(categoryNames[slug] || slug);
 

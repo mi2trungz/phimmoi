@@ -1,4 +1,6 @@
 // Player and Movie Detail Functions
+import { saveWatchProgress, getMovieProgress, formatTime } from './watch-history.js';
+import { getCurrentUser } from './auth.js';
 
 // Open movie detail modal
 async function openMovieDetail(slug) {
@@ -71,6 +73,11 @@ function renderMovieDetail(movie) {
     // Get episodes - API returns episodes[0].items
     const episodes = movie.episodes || [];
     const hasEpisodes = episodes.length > 0 && episodes[0].items && episodes[0].items.length > 0;
+
+    // Store movie data globally for watch history
+    window.currentMovieSlug = movie.slug || '';
+    window.currentMovieTitle = title;
+    window.currentMoviePoster = posterUrl;
 
     modalBody.innerHTML = `
         <div class="movie-detail">
@@ -165,11 +172,17 @@ function renderEpisodesList(episodes) {
                 const fallback = btn.dataset.fallback;
                 const name = btn.dataset.name;
 
-                // Open video link in new tab (prioritize embed over m3u8)
-                const videoUrl = fallback || link;
-                if (videoUrl) {
-                    window.open(videoUrl, '_blank');
-                    showToast(`Đang mở: ${name}`, 'success');
+                // Play video in modal player - prioritize embed over m3u8 (m3u8 server blocked)
+                if (fallback || link) {
+                    playEpisode(
+                        fallback || link,  // Prioritize embed (m3u8 blocked by CORS)
+                        name,
+                        fallback,
+                        window.currentMovieSlug,
+                        window.currentMovieTitle,
+                        window.currentMoviePoster
+                    );
+                    showToast(`Đang phát: ${name}`, 'success');
                 } else {
                     showToast('Không tìm thấy link phim', 'error');
                 }
@@ -189,13 +202,33 @@ function renderEpisodesList(episodes) {
 // Play episode
 let currentPlayer = null;
 let currentHls = null;
+let currentMovieData = null;
+let currentEpisodeData = null;
+let progressSaveInterval = null;
 
-function playEpisode(link, episodeName, embedFallback = null) {
+async function playEpisode(link, episodeName, embedFallback = null, movieSlug = null, movieTitle = null, posterUrl = null) {
     const playerContainer = document.getElementById('playerContainer');
 
     if (!link) {
         showToast('Không tìm thấy link phim', 'error');
         return;
+    }
+
+    // Store current movie and episode data for watch history
+    currentMovieData = {
+        slug: movieSlug || window.currentMovieSlug || '',
+        title: movieTitle || window.currentMovieTitle || '',
+        posterUrl: posterUrl || window.currentMoviePoster || ''
+    };
+    currentEpisodeData = {
+        name: episodeName,
+        serverName: 'Default'
+    };
+
+    // Clear previous progress save interval
+    if (progressSaveInterval) {
+        clearInterval(progressSaveInterval);
+        progressSaveInterval = null;
     }
 
     // Destroy previous player if exists
@@ -212,6 +245,19 @@ function playEpisode(link, episodeName, embedFallback = null) {
 
     // Show player immediately
     playerContainer.style.display = 'block';
+
+    // Check for saved progress
+    const user = getCurrentUser();
+    let savedProgress = null;
+    if (user && currentMovieData.slug) {
+        savedProgress = await getMovieProgress(user.uid, currentMovieData.slug, episodeName);
+    }
+
+    // Store saved progress for display (don't add to URL as it doesn't work)
+    let savedTimeStr = null;
+    if (savedProgress && savedProgress.progress > 0) {
+        savedTimeStr = formatTime(savedProgress.progress);
+    }
 
     // Check if link is m3u8 (HLS stream)
     if (link.includes('.m3u8')) {
@@ -252,6 +298,15 @@ function playEpisode(link, episodeName, embedFallback = null) {
                         options: [1080, 720, 480, 360]
                     }
                 });
+
+                // Resume from saved progress if available
+                if (savedProgress && savedProgress.progress > 5) {
+                    video.currentTime = savedProgress.progress;
+                    showToast(`Tiếp tục từ ${formatTime(savedProgress.progress)}`, 'info');
+                }
+
+                // Setup progress tracking
+                setupProgressTracking(video);
 
                 video.play().catch(e => console.log('Auto-play prevented:', e));
             });
@@ -296,16 +351,48 @@ function playEpisode(link, episodeName, embedFallback = null) {
             // Native HLS support (Safari)
             video.src = link;
             currentPlayer = new Plyr(video);
+
+            // Resume from saved progress if available
+            if (savedProgress && savedProgress.progress > 5) {
+                video.currentTime = savedProgress.progress;
+                showToast(`Tiếp tục từ ${formatTime(savedProgress.progress)}`, 'info');
+            }
+
+            // Setup progress tracking
+            setupProgressTracking(video);
+
             video.play().catch(e => console.log('Auto-play prevented:', e));
         } else {
             showToast('Trình duyệt không hỗ trợ phát video này', 'error');
         }
     } else {
         // Use iframe for embed links
+        console.log('📺 Using iframe player for:', link);
+
+        // Show progress reminder if exists
+        const progressReminder = savedTimeStr ? `
+            <div class="progress-reminder" id="progressReminder">
+                <div class="progress-reminder-content">
+                    <span class="progress-reminder-icon">⏱️</span>
+                    <span class="progress-reminder-text">
+                        <strong>Đã lưu vị trí:</strong> ${savedTimeStr}
+                        <br>
+                        <small>Vui lòng tua video tới thời điểm này</small>
+                    </span>
+                    <button class="progress-reminder-close" onclick="closeProgressReminder()">✕</button>
+                </div>
+            </div>
+        ` : '';
+
         playerContainer.innerHTML = `
+            ${progressReminder}
             <div class="player-header">
                 <h3>🎬 Đang phát: ${episodeName}</h3>
-                <button class="player-close" onclick="closePlayer()">✕</button>
+                <div class="player-controls">
+                    ${savedTimeStr ? `<span class="saved-position-badge" title="Vị trí đã lưu">📍 ${savedTimeStr}</span>` : ''}
+                    <button class="save-progress-btn" onclick="showSaveProgressDialog()">💾 Lưu vị trí</button>
+                    <button class="player-close" onclick="closePlayer()">✕</button>
+                </div>
             </div>
             <div class="player-wrapper">
                 <iframe 
@@ -316,6 +403,31 @@ function playEpisode(link, episodeName, embedFallback = null) {
                 ></iframe>
             </div>
         `;
+
+        // For iframe, we can't track real-time progress, so save watch history immediately
+        // with 0 progress to mark that user started watching this episode
+        if (user && currentMovieData && currentEpisodeData) {
+            console.log('💾 Saving watch history for iframe video...');
+            saveWatchProgress(
+                user.uid,
+                currentMovieData,
+                currentEpisodeData,
+                0, // Start at 0 since we can't track iframe progress
+                0  // Duration unknown for iframe
+            ).then(result => {
+                if (result.success) {
+                    console.log('✅ Watch history saved for iframe');
+                } else {
+                    console.error('❌ Failed to save watch history:', result.error);
+                }
+            }).catch(err => console.error('❌ Error saving watch history:', err));
+        } else {
+            console.log('⚠️ Cannot save watch history - missing data:', {
+                user: !!user,
+                movieData: !!currentMovieData,
+                episodeData: !!currentEpisodeData
+            });
+        }
     }
 
     // Scroll to player with smooth animation
@@ -328,9 +440,178 @@ function playEpisode(link, episodeName, embedFallback = null) {
     }, 100);
 }
 
+// Setup progress tracking for video element
+function setupProgressTracking(video) {
+    console.log('🎯 setupProgressTracking called');
+
+    if (!video) {
+        console.error('❌ No video element provided');
+        return;
+    }
+
+    const user = getCurrentUser();
+    console.log('👤 Current user:', user);
+    console.log('🎬 Current movie data:', currentMovieData);
+    console.log('📺 Current episode data:', currentEpisodeData);
+
+    if (!user || !currentMovieData || !currentEpisodeData) {
+        console.error('❌ Missing user or movie data for progress tracking');
+        return;
+    }
+
+    console.log('✅ Starting progress tracking interval...');
+
+    // Save progress every 5 seconds while playing
+    progressSaveInterval = setInterval(() => {
+        if (video.currentTime > 0 && video.duration > 0) {
+            saveWatchProgress(
+                user.uid,
+                currentMovieData,
+                currentEpisodeData,
+                video.currentTime,
+                video.duration
+            ).catch(err => console.error('Error saving progress:', err));
+        }
+    }, 5000);
+
+    // Save progress when video is paused
+    video.addEventListener('pause', () => {
+        if (video.currentTime > 0 && video.duration > 0) {
+            saveWatchProgress(
+                user.uid,
+                currentMovieData,
+                currentEpisodeData,
+                video.currentTime,
+                video.duration
+            ).catch(err => console.error('Error saving progress:', err));
+        }
+    });
+
+    // Save progress when video ends
+    video.addEventListener('ended', () => {
+        if (video.duration > 0) {
+            saveWatchProgress(
+                user.uid,
+                currentMovieData,
+                currentEpisodeData,
+                video.duration,
+                video.duration
+            ).catch(err => console.error('Error saving progress:', err));
+        }
+    });
+}
+
+// Parse time string to seconds
+function parseTimeToSeconds(timeString) {
+    timeString = timeString.trim();
+
+    // If just a number, treat as seconds
+    if (/^\d+$/.test(timeString)) {
+        return parseInt(timeString);
+    }
+
+    // Parse HH:MM:SS or MM:SS format
+    const parts = timeString.split(':').map(p => parseInt(p));
+
+    if (parts.some(isNaN)) {
+        return null;
+    }
+
+    if (parts.length === 2) {
+        // MM:SS
+        const [minutes, seconds] = parts;
+        return minutes * 60 + seconds;
+    } else if (parts.length === 3) {
+        // HH:MM:SS
+        const [hours, minutes, seconds] = parts;
+        return hours * 3600 + minutes * 60 + seconds;
+    }
+
+    return null;
+}
+
+// Show save progress dialog
+function showSaveProgressDialog() {
+    const time = prompt(
+        "Nhập thời gian hiện tại của video:\n\n" +
+        "Ví dụ:\n" +
+        "• 5:30 (5 phút 30 giây)\n" +
+        "• 330 (330 giây)\n" +
+        "• 1:05:30 (1 giờ 5 phút 30 giây)"
+    );
+
+    if (time) {
+        const seconds = parseTimeToSeconds(time);
+        if (seconds !== null && seconds >= 0) {
+            saveManualProgress(seconds);
+        } else {
+            showToast('❌ Định dạng thời gian không hợp lệ', 'error');
+        }
+    }
+}
+
+// Close progress reminder
+function closeProgressReminder() {
+    const reminder = document.getElementById('progressReminder');
+    if (reminder) {
+        reminder.style.display = 'none';
+    }
+}
+
+// Save manual progress
+async function saveManualProgress(seconds) {
+    const user = getCurrentUser();
+
+    if (!user) {
+        showToast('⚠️ Vui lòng đăng nhập để lưu tiến trình', 'warning');
+        return;
+    }
+
+    if (!currentMovieData || !currentEpisodeData) {
+        showToast('❌ Không thể lưu tiến trình', 'error');
+        return;
+    }
+
+    const result = await saveWatchProgress(
+        user.uid,
+        currentMovieData,
+        currentEpisodeData,
+        seconds,
+        0  // Duration unknown for manual save
+    );
+
+    if (result.success) {
+        const timeStr = formatTime(seconds);
+        showToast(`✅ Đã lưu vị trí: ${timeStr}`, 'success');
+    } else {
+        showToast('❌ Lỗi khi lưu tiến trình', 'error');
+    }
+}
+
 // Close player
-function closePlayer() {
+async function closePlayer() {
     const playerContainer = document.getElementById('playerContainer');
+
+    // Save progress before closing
+    const user = getCurrentUser();
+    if (user && currentMovieData && currentEpisodeData) {
+        const video = document.querySelector('#hlsPlayer, video');
+        if (video && video.currentTime > 0 && video.duration > 0) {
+            await saveWatchProgress(
+                user.uid,
+                currentMovieData,
+                currentEpisodeData,
+                video.currentTime,
+                video.duration
+            ).catch(err => console.error('Error saving progress:', err));
+        }
+    }
+
+    // Clear progress save interval
+    if (progressSaveInterval) {
+        clearInterval(progressSaveInterval);
+        progressSaveInterval = null;
+    }
 
     // Destroy Plyr instance if exists
     if (currentPlayer) {
@@ -515,6 +796,122 @@ function addMovieDetailStyles() {
             border-bottom: 1px solid var(--border-color);
         }
         
+        .player-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .save-progress-btn {
+            padding: 0.5rem 1rem;
+            background: var(--accent-gradient);
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition-base);
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        .save-progress-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .save-progress-btn:active {
+            transform: translateY(0);
+        }
+        
+        .saved-position-badge {
+            padding: 0.5rem 1rem;
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--accent-primary);
+            border: 1px solid var(--accent-primary);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        .progress-reminder {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1rem;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .progress-reminder-content {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: white;
+        }
+        
+        .progress-reminder-icon {
+            font-size: 2rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.1);
+            }
+        }
+        
+        .progress-reminder-text {
+            flex: 1;
+            line-height: 1.5;
+        }
+        
+        .progress-reminder-text strong {
+            font-size: var(--font-size-lg);
+        }
+        
+        .progress-reminder-text small {
+            opacity: 0.9;
+            font-size: var(--font-size-sm);
+        }
+        
+        .progress-reminder-close {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            color: white;
+            font-size: 1.25rem;
+            cursor: pointer;
+            transition: all var(--transition-base);
+        }
+        
+        .progress-reminder-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: rotate(90deg);
+        }
+        
         .player-header h3 {
             font-size: var(--font-size-lg);
             color: var(--text-primary);
@@ -577,3 +974,11 @@ function scrollToEpisodes() {
         });
     }
 }
+
+// Make functions globally accessible
+window.openMovieDetail = openMovieDetail;
+window.closeModal = closeModal;
+window.closePlayer = closePlayer;
+window.scrollToEpisodes = scrollToEpisodes;
+window.showSaveProgressDialog = showSaveProgressDialog;
+window.closeProgressReminder = closeProgressReminder;
